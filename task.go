@@ -16,14 +16,19 @@ const (
 	TaskState_Done
 )
 
+const (
+	TaskCommand_None = iota
+	TaskCommand_Yield
+	TaskCommand_Finished
+)
+
 type FlowControl interface {
 	Yield(costFunc func(FlowControl))
 	Params() interface{}
 }
 
 type Task struct {
-	scheuler2task chan string
-	task2scheuler chan string
+	mailbox
 
 	executor func(FlowControl)
 	params   interface{}
@@ -32,6 +37,8 @@ type Task struct {
 	state      TaskState
 
 	msgid int
+
+	sch *Scheduler
 }
 
 func execWrapper(task *Task) {
@@ -40,7 +47,7 @@ func execWrapper(task *Task) {
 
 	task.Finished()
 
-	markFinished()
+	task.sch.markFinished()
 }
 
 func costWrapper(task *Task, executor func(FlowControl)) {
@@ -57,17 +64,14 @@ func (self *Task) Params() interface{} {
 // 任务线程调用
 func (self *Task) Yield(costFunc func(FlowControl)) {
 
-	addCostTask(self)
 	go costWrapper(self, costFunc)
 
 	self.setState(TaskState_Yield)
 
-	// 通知调度已经挂起
-	self.task2scheuler <- "yield"
+	self.sch.send(TaskCommand_Yield)
 
 	// 等待恢复逻辑
-	<-self.scheuler2task
-
+	self.recv()
 }
 
 // 任务线程调用
@@ -76,7 +80,7 @@ func (self *Task) Finished() {
 	self.setState(TaskState_WaitSync)
 
 	// 通知调度已经挂起
-	self.task2scheuler <- "finished"
+	self.sch.send(TaskCommand_Finished)
 
 	self.setState(TaskState_Done)
 }
@@ -85,40 +89,12 @@ func (self *Task) Finished() {
 func (self *Task) CostTaskDone() {
 
 	self.setState(TaskState_CostTaskDone)
-	postTask(self, false)
+	self.sch.postTask(self, false)
 
-	removeCostTask(self)
-}
-
-// 调度线程调用
-func (self *Task) Exec() string {
-
-	go execWrapper(self)
-
-	result := <-self.task2scheuler
-
-	//	fmt.Println(self.params, "scheuler", result)
-
-	return result
 }
 
 func (self *Task) NeedResume() bool {
 	return self.getState() == TaskState_CostTaskDone
-}
-
-// 调度线程调用
-func (self *Task) Resume() string {
-
-	self.setState(TaskState_Resume)
-
-	// 通知任务线程完成
-	self.scheuler2task <- "resume"
-
-	result := <-self.task2scheuler
-
-	//	fmt.Println(self.params, "scheuler", result)
-
-	return result
 }
 
 func (self *Task) setState(s TaskState) {
@@ -134,10 +110,10 @@ func (self *Task) getState() TaskState {
 	return self.state
 }
 
-func newTask() *Task {
+func NewTask() *Task {
 	self := &Task{
-		scheuler2task: make(chan string),
-		task2scheuler: make(chan string),
+
+		mailbox: mailBoxAlloc(),
 	}
 
 	self.setState(TaskState_Running)

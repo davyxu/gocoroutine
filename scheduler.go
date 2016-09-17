@@ -1,90 +1,98 @@
 package gocoroutine
 
 import (
+	//	"fmt"
 	"sync"
 )
 
-var taskList = make(chan *Task, 10)
+const (
+	SchedulerCommand_None = iota
+	SchedulerCommand_Resume
+)
 
-var runningTask int
-var runningTaskGuard sync.Mutex
+type Scheduler struct {
+	taskList chan *Task
 
-func postTask(t *Task, normaltask bool) {
+	runningTask      int
+	runningTaskGuard sync.Mutex
+
+	mailbox
+}
+
+func (self *Scheduler) AddTask(exec func(FlowControl), params interface{}) {
+
+	task := NewTask()
+	task.executor = exec
+	task.params = params
+	task.sch = self
+
+	self.postTask(task, true)
+}
+
+func (self *Scheduler) postTask(t *Task, normaltask bool) {
 
 	if normaltask {
-		runningTaskGuard.Lock()
-		runningTask++
-		runningTaskGuard.Unlock()
+		self.runningTaskGuard.Lock()
+		self.runningTask++
+		self.runningTaskGuard.Unlock()
+
 	}
 
-	taskList <- t
+	self.taskList <- t
 }
 
-func runningTaskLen() int {
-	runningTaskGuard.Lock()
+func (self *Scheduler) runningTaskLen() int {
+	self.runningTaskGuard.Lock()
 
-	defer runningTaskGuard.Unlock()
+	defer self.runningTaskGuard.Unlock()
 
-	return runningTask
+	return self.runningTask
 
 }
 
-func markFinished() {
+func (self *Scheduler) markFinished() {
 
-	runningTaskGuard.Lock()
-	runningTask--
-	runningTaskGuard.Unlock()
+	self.runningTaskGuard.Lock()
+	self.runningTask--
+	self.runningTaskGuard.Unlock()
 
 	//	fmt.Println("markFinished", runningTaskLen())
 }
 
-func fetchTask() *Task {
+func (self *Scheduler) fetchTask() *Task {
 
-	return <-taskList
+	return <-self.taskList
 }
 
-func procTask() {
+func (self *Scheduler) procTask() {
 
 	for {
 
-		task := fetchTask()
+		task := self.fetchTask()
 
 		if task == nil {
 			break
 		}
 
 		if task.NeedResume() {
-			task.Resume()
-		} else {
 
-			task.Exec()
+			// 通知任务线程完成
+			task.send(SchedulerCommand_Resume)
+
+		} else {
+			go execWrapper(task)
 		}
+
+		self.mailbox.recv()
 	}
 
 }
 
-var costTaskMap = make(map[*Task]*Task)
-var costTaskMapGuard sync.Mutex
-
-func addCostTask(t *Task) {
-	costTaskMapGuard.Lock()
-	costTaskMap[t] = t
-	costTaskMapGuard.Unlock()
+func (self *Scheduler) Start() {
+	go self.procTask()
 }
 
-func removeCostTask(t *Task) {
-	costTaskMapGuard.Lock()
-	delete(costTaskMap, t)
-	costTaskMapGuard.Unlock()
-}
-
-func costTaskLen() int {
-	costTaskMapGuard.Lock()
-	defer costTaskMapGuard.Unlock()
-	return len(costTaskMap)
-}
-
-func waitExit() {
+func (self *Scheduler) Exit() {
 
 	endChan := make(chan bool)
 
@@ -92,7 +100,7 @@ func waitExit() {
 
 		for {
 
-			l := runningTaskLen()
+			l := self.runningTaskLen()
 
 			if l == 0 {
 				break
@@ -106,4 +114,16 @@ func waitExit() {
 
 	<-endChan
 
+}
+
+func NewScheduler() *Scheduler {
+
+	return &Scheduler{
+		taskList: make(chan *Task, 10),
+		mailbox:  mailBoxAlloc(),
+	}
+}
+
+func mailBoxAlloc() mailbox {
+	return newChanBox()
 }

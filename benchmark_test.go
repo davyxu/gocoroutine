@@ -1,35 +1,36 @@
 package gocoroutine
 
 import (
+	//	"fmt"
 	"sync"
 	"testing"
 )
 
 func msgProc_benchmark(fc FlowControl) {
 
-	fc.Yield(dbProc_benchmark)
+	//fmt.Println("msg 1")
+	//fc.Yield(dbProc_benchmark)
 
 }
 
 func dbProc_benchmark(fc FlowControl) {
 
+	//fmt.Println("db 1")
 	//	msgid := fc.Params().(int)
 }
 
-func recvProc_benchmark() {
+func recvProc_benchmark(sch *Scheduler) {
 
 	for i := 0; i < 100000; i++ {
 
-		go func(msgid int) {
+		//go func(msgid int) {
 
-			task := newTask()
-			task.executor = msgProc_benchmark
-			task.params = msgid
+		sch.AddTask(msgProc_benchmark, i)
 
-			//	fmt.Println(msgid, "recv Msg")
-			postTask(task, true)
+		//	fmt.Println(msgid, "recv Msg")
+		//postTask(task, true)
 
-		}(i)
+		//}(i)
 
 	}
 
@@ -37,10 +38,13 @@ func recvProc_benchmark() {
 
 func TestBenchmark(t *testing.T) {
 
-	go procTask()
-	recvProc_benchmark()
+	sch := NewScheduler()
 
-	waitExit()
+	sch.Start()
+
+	recvProc_benchmark(sch)
+
+	sch.Exit()
 
 }
 
@@ -54,11 +58,12 @@ func traditionalLogic(wg *sync.WaitGroup) {
 	}()
 }
 
+// go test -bench=Benchmark -cpuprofile=cprof
 func TestTraditional(t *testing.T) {
 
 	var wg sync.WaitGroup
 
-	for i := 0; i < 100000; i++ {
+	for i := 0; i < 1000; i++ {
 
 		traditionalLogic(&wg)
 	}

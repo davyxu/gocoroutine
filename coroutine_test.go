@@ -3,7 +3,7 @@ package gocoroutine
 import (
 	"fmt"
 	"math/rand"
-	//	"testing"
+	///	"testing"
 	"time"
 )
 
@@ -22,18 +22,15 @@ func dbProc(fc FlowControl) {
 	fmt.Println(msgid, "dbProc")
 }
 
-func recvProc() {
+func recvProc(sch *Scheduler) {
 
-	for i := 0; i < 10; i++ {
+	for i := 0; i < 1; i++ {
 
 		go func(msgid int) {
 
-			task := newTask()
-			task.executor = msgProc
-			task.params = msgid
+			sch.AddTask(msgProc_benchmark, msgid)
 
 			fmt.Println(msgid, "recv Msg")
-			postTask(task, true)
 
 		}(i)
 
@@ -43,9 +40,12 @@ func recvProc() {
 
 //func TestCoroutine(t *testing.T) {
 
-//	go procTask()
-//	recvProc()
+//	sch := NewScheduler()
 
-//	waitExit()
+//	sch.Start()
+
+//	recvProc(sch)
+
+//	sch.Exit()
 
 //}
