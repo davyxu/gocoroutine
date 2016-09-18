@@ -5,21 +5,11 @@ import (
 	"sync"
 )
 
-type TaskState int
+type taskSignal int
 
 const (
-	TaskState_Running      TaskState = iota
-	TaskState_Yield                  // 耗时任务同时开始
-	TaskState_CostTaskDone           // 等待恢复
-	TaskState_Resume                 // 已经恢复
-	TaskState_WaitSync               // 等待调度同步
-	TaskState_Done
-)
-
-const (
-	TaskCommand_None = iota
-	TaskCommand_Yield
-	TaskCommand_Finished
+	taskSignal_None taskSignal = iota
+	taskSignal_Resume
 )
 
 type FlowControl interface {
@@ -28,33 +18,15 @@ type FlowControl interface {
 }
 
 type Task struct {
-	mailbox
+	signalChan chan taskSignal
 
 	executor func(FlowControl)
 	params   interface{}
 
-	stateGuard sync.Mutex
-	state      TaskState
-
-	msgid int
+	needResumeGuard sync.Mutex
+	needResume      bool
 
 	sch *Scheduler
-}
-
-func execWrapper(task *Task) {
-
-	task.executor(task)
-
-	task.Finished()
-
-	task.sch.markFinished()
-}
-
-func costWrapper(task *Task, executor func(FlowControl)) {
-
-	executor(task)
-
-	task.CostTaskDone()
 }
 
 func (self *Task) Params() interface{} {
@@ -64,59 +36,40 @@ func (self *Task) Params() interface{} {
 // 任务线程调用
 func (self *Task) Yield(costFunc func(FlowControl)) {
 
-	go costWrapper(self, costFunc)
+	// 并行执行耗时任务
+	go func() {
 
-	self.setState(TaskState_Yield)
+		costFunc(self)
 
-	self.sch.send(TaskCommand_Yield)
+		// 耗时任务完成
+		self.needResumeGuard.Lock()
+		self.needResume = true
+		self.needResumeGuard.Unlock()
+
+		self.sch.postCostTask(self)
+	}()
+
+	// 通知调度 本线程挂起
+	self.sch.signal(scheduler_Yield)
 
 	// 等待恢复逻辑
-	self.recv()
-}
-
-// 任务线程调用
-func (self *Task) Finished() {
-
-	self.setState(TaskState_WaitSync)
-
-	// 通知调度已经挂起
-	self.sch.send(TaskCommand_Finished)
-
-	self.setState(TaskState_Done)
-}
-
-// 耗时线程调用
-func (self *Task) CostTaskDone() {
-
-	self.setState(TaskState_CostTaskDone)
-	self.sch.postTask(self, false)
-
+	<-self.signalChan
 }
 
 func (self *Task) NeedResume() bool {
-	return self.getState() == TaskState_CostTaskDone
+	self.needResumeGuard.Lock()
+	defer self.needResumeGuard.Unlock()
+	return self.needResume
 }
 
-func (self *Task) setState(s TaskState) {
-	self.stateGuard.Lock()
-	self.state = s
-	//fmt.Printf("%v setstate %v\n", self.params, s)
-	self.stateGuard.Unlock()
-}
-
-func (self *Task) getState() TaskState {
-	self.stateGuard.Lock()
-	defer self.stateGuard.Unlock()
-	return self.state
+func (self *Task) signal(s taskSignal) {
+	self.signalChan <- s
 }
 
 func NewTask() *Task {
 	self := &Task{
-
-		mailbox: mailBoxAlloc(),
+		signalChan: make(chan taskSignal),
 	}
-
-	self.setState(TaskState_Running)
 
 	return self
 }

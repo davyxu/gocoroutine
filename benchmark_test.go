@@ -9,7 +9,7 @@ import (
 func msgProc_benchmark(fc FlowControl) {
 
 	//fmt.Println("msg 1")
-	//fc.Yield(dbProc_benchmark)
+	fc.Yield(dbProc_benchmark)
 
 }
 
@@ -22,16 +22,7 @@ func dbProc_benchmark(fc FlowControl) {
 func recvProc_benchmark(sch *Scheduler) {
 
 	for i := 0; i < 100000; i++ {
-
-		//go func(msgid int) {
-
 		sch.AddTask(msgProc_benchmark, i)
-
-		//	fmt.Println(msgid, "recv Msg")
-		//postTask(task, true)
-
-		//}(i)
-
 	}
 
 }
@@ -63,7 +54,7 @@ func TestTraditional(t *testing.T) {
 
 	var wg sync.WaitGroup
 
-	for i := 0; i < 1000; i++ {
+	for i := 0; i < 100000; i++ {
 
 		traditionalLogic(&wg)
 	}
