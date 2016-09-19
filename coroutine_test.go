@@ -3,16 +3,18 @@ package gocoroutine
 import (
 	"fmt"
 	"math/rand"
-	///	"testing"
+	"testing"
 	"time"
 )
 
+// 消息处理
 func msgProc(fc FlowControl) {
 
 	fc.Yield(dbProc)
 
 }
 
+// db耗时处理
 func dbProc(fc FlowControl) {
 
 	msgid := fc.Params().(int)
@@ -22,30 +24,27 @@ func dbProc(fc FlowControl) {
 	fmt.Println(msgid, "dbProc")
 }
 
+// 消息线程, 生成任务
 func recvProc(sch *Scheduler) {
 
-	for i := 0; i < 1; i++ {
+	for i := 0; i < 2; i++ {
 
-		go func(msgid int) {
+		sch.AddTask(msgProc, i)
 
-			sch.AddTask(msgProc_benchmark, msgid)
-
-			fmt.Println(msgid, "recv Msg")
-
-		}(i)
+		fmt.Println(i, "recv Msg")
 
 	}
 
 }
 
-//func TestCoroutine(t *testing.T) {
+func TestCoroutine(t *testing.T) {
 
-//	sch := NewScheduler()
+	sch := NewScheduler()
 
-//	sch.Start()
+	sch.Start()
 
-//	recvProc(sch)
+	recvProc(sch)
 
-//	sch.Exit()
+	sch.Exit()
 
-//}
+}
